@@ -1,0 +1,51 @@
+# Composer
+/vendor/
+/composer.phar
+# /composer.lock
+
+# PHP
+*.php~
+*.php.bak
+*.php.old
+*.php.save
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+.nvim/
+.DS_Store
+.codeassistant/
+.sourcecraft/
+rest.code-workspace
+
+# Logs
+*.log
+
+# Cache
+cache/
+tmp/
+
+# Build
+/build/
+
+# Documentation
+/docs/build/
+
+# Code coverage
+/coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS generated files
+Thumbs.db
+.DS_Store

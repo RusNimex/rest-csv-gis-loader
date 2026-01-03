@@ -1,41 +1,53 @@
--- Компании --
+--
+-- Компании
+--
 CREATE TABLE IF NOT EXISTS company (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     name VARCHAR(255) NOT NULL
 );
 
--- Телефоны --
-CREATE TABLE IF NOT EXISTS company_phones (
+--
+-- Доп инфо по компаниям
+--
+CREATE TABLE IF NOT EXISTS company_contact (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     company_id INT NOT NULL,
-    phone VARCHAR(100) NOT NULL
+    phone VARCHAR(150) DEFAULT NULL,
+    email VARCHAR(150) DEFAULT NULL,
+
+    CONSTRAINT FK_company_phone 
+    FOREIGN KEY (company_id) REFERENCES company(id) ON DELETE CASCADE,
+    
+    INDEX IX_phone (phone)
 );
 
-ALTER TABLE company_phones 
-ADD CONSTRAINT FK_company_phone 
-FOREIGN KEY (company_id) REFERENCES company(id);
-
-ALTER TABLE company_phones ADD INDEX IX_phone (phone);
-
--- Регионы --
+-- 
+-- Регионы 
+--
 CREATE TABLE IF NOT EXISTS region (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     name VARCHAR(255) NOT NULL
 );
 
--- Районы --
+-- 
+-- Районы 
+--
 CREATE TABLE IF NOT EXISTS district (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     name VARCHAR(255) NOT NULL
 );
 
--- Города --
+--
+-- Города 
+--
 CREATE TABLE IF NOT EXISTS city (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     name VARCHAR(255) NOT NULL
 );
 
--- Связь регион-район-город --
+-- 
+-- Связь регион-район-город 
+--
 CREATE TABLE IF NOT EXISTS geo (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     region_id INT DEFAULT NULL,
@@ -52,7 +64,9 @@ CREATE TABLE IF NOT EXISTS geo (
     FOREIGN KEY (city_id) REFERENCES city(id) ON DELETE SET NULL
 );
 
--- Связь компаний и городов, районов, регионов --
+-- 
+-- Связь компаний и городов, районов, регионов 
+--
 CREATE TABLE IF NOT EXISTS company_geo (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     geo_id INT NOT NULL,

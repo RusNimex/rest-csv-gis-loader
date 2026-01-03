@@ -1,5 +1,5 @@
-ALTER TABLE company_phones DROP CONSTRAINT FK_company_phone;
-ALTER TABLE company_phones DROP INDEX IX_phone;
+ALTER TABLE company_contact DROP CONSTRAINT FK_company_phone;
+ALTER TABLE company_contact DROP INDEX IX_phone;
 ALTER TABLE geo DROP CONSTRAINT FK_region;
 ALTER TABLE geo DROP CONSTRAINT FK_district;
 ALTER TABLE geo DROP CONSTRAINT FK_city;
@@ -12,5 +12,5 @@ DROP TABLE IF EXISTS geo;
 DROP TABLE IF EXISTS city;
 DROP TABLE IF EXISTS district;
 DROP TABLE IF EXISTS region;
-DROP TABLE IF EXISTS company_phones;
+DROP TABLE IF EXISTS company_contact;
 DROP TABLE IF EXISTS company;

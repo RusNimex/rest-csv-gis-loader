@@ -2,12 +2,10 @@
 
 namespace App\Services;
 
-use \League\Csv\Reader;
-use App\Models\GisCompany;
+use League\Csv\Reader;
 use App\Interfaces\RepositoryInterface;
 use App\Interfaces\CsvRecordInterface;
 use App\Interfaces\CsvImportServiceInterface;
-use App\Repository\CompanyRepository;
 
 /**
  * Сервис для импорта CSV файла
@@ -15,62 +13,89 @@ use App\Repository\CompanyRepository;
 class CsvImportService implements CsvImportServiceInterface
 {
     /**
-     * Ошибки
+     * @var array Ошибки
      */
     private array $errors = [];
 
     /**
-     * CSV reader class
+     * @var Reader CSV reader class
      */
     protected Reader $reader;
 
-    /** 
-     * Размер чанка
+    /**
+     * @var int Размер чанка
      */
     private int $chunkSize = 100;
 
     /**
-     * Репозиторий
+     * @var RepositoryInterface|mixed Репозиторий для работы с данными
      */
     private RepositoryInterface $repository;
 
     /**
-     * @var class-string<CsvRecordInterface>
+     * @var class-string<CsvRecordInterface> Каждая строка представляется как DTO-модель
      */
     private string $contract;
 
     /**
-     * Сводка
+     * @var array Сводка импорта файлов
      */
     private array $summary = [
         'total' => 0,
         'imported' => 0,
-        'fileName' => ''
+        'files' => []
     ];
 
     /**
-     * Наполним ридер данными о файле
-     * 
-     * @param array $file
+     * Наполним обязательными параметрами
+     *
+     * @param array $files Массив файлов из $_FILES['files'], структура:
+     *     - 'name': array<string> - имена файлов
+     *     - 'type': array<string> - MIME-типы файлов
+     *     - 'tmp_name': array<string> - временные пути файлов
+     *     - 'error': array<int> - коды ошибок загрузки
+     *     - 'size': array<int> - размеры файлов в байтах
+     * @param string $repositoryClassName Имя класса репозитория для работы с данными
+     * @param string $contractClassName Имя класса DTO-модели для обработки строк CSV
      */
     public function __construct(
-        protected array $file, 
+        protected array  $files,
         protected string $repositoryClassName,
         protected string $contractClassName,
     ) {
-        $this->reader = Reader::createFromPath($file['file']['tmp_name']);
-        $this->reader->setHeaderOffset(0);
-        $this->reader->setDelimiter(';');
         $this->repository = new $repositoryClassName();
         $this->contract = $contractClassName;
-        $this->summary['total'] = count($this->reader);
-        $this->summary['fileName'] = $file['file']['name'];
     }
 
     /**
-     * Импортируем файл
+     * {@inheritdoc}
+     * @return void
      */
-    public function load(): void
+    public function import(): void
+    {
+        try {
+            foreach ($this->files['name'] as $key => $fileName) {
+                $this->reader = Reader::from($this->files['tmp_name'][$key]);
+                $this->reader->setHeaderOffset(0);
+                $this->reader->setDelimiter(';');
+                $this->summary['total'] += count($this->reader);
+                $this->summary['files'][] = $fileName;
+                $this->load();
+            }
+        } catch (\Exception $e) { // UnavailableStream|InvalidArgument
+            $this->errors[] = $e->getMessage();
+            return;
+        }
+    }
+
+    /**
+     * Каждый файл загружается в отдельном потоке
+     * Загружаем частями
+     * Каждую запись оборачиваем в DTO-модель {@see CsvRecordInterface}
+     *
+     * @return void
+     */
+    protected function load(): void
     {
         try {
             $chunks = $this->reader->chunkBy($this->chunkSize);
@@ -87,7 +112,7 @@ class CsvImportService implements CsvImportServiceInterface
     }
 
     /**
-     * Возвращает ошибки
+     * {@inheritdoc}
      */
     public function getErrors(): array
     {
@@ -95,7 +120,7 @@ class CsvImportService implements CsvImportServiceInterface
     }
 
     /**
-     * Проверяет, есть ли ошибки
+     * {@inheritdoc}
      */
     public function hasErrors(): bool
     {
@@ -103,7 +128,7 @@ class CsvImportService implements CsvImportServiceInterface
     }
 
     /**
-     * Возвращает сводку
+     * {@inheritdoc}
      */
     public function getSummary(): array
     {

@@ -8,76 +8,98 @@ use App\Services\CsvImportService;
 use App\Repository\CompanyRepository;
 
 /**
- * Контроллер загрузки файла
+ * Контроллер загрузки файлов
  */
 class UploadController
 {
     use ResponseTrait;
 
     /**
-     * Файлы
+     * @var array|mixed Файлы из $_FILES['files']
      */
     protected array $files;
 
     /**
-     * Ошибки
+     * @var array|string[] Допустимые типы файлов
+     */
+    protected array $allowedTypes = ['text/csv'];
+
+    /**
+     * @var int|float Максимальный размер файла в байтах
+     */
+    protected int|float $maxSize = 5 * 1024 * 1024;
+
+    /**
+     * @var array Ошибки
      */
     protected array $errors = [];
 
     /**
-     * Конструктор
+     * Необходимый минимум для работы с CSV файлами
      */
     public function __construct()
     {
-        $this->files = $_FILES ?? [];
+        $this->files = $_FILES['files'] ?? [];
     }
 
     /**
-     * Загрузка файла
+     * Обрабатываем загрузку файла
+     * 
+     * Основная логика в сервисе {@see CsvImportService}
      */
-    public function upload()
+    public function upload(): void
     {
         if (!$this->validate()) {
-            self::sendError(['errors' => $this->errors]);
+            self::sendError($this->errors);
         }
 
         $service = new CsvImportService(
-            $_FILES,
+            $this->files,
             CompanyRepository::class,
             GisCompany::class,
         );
 
-        $service->load();
+        $service->import();
+
         if ($service->hasErrors()) {
-            self::sendError(['errors' => $service->getErrors()], 500);
+            self::sendError($service->getErrors());
         }
 
         self::sendResponse([
-            'message' => 'File uploaded successfully',
+            'message' => 'Файлы успешно загружены',
             'summary' => $service->getSummary(),
         ]);
     }
 
     /**
-     * Валидация файла
+     * Валидация файлов
+     *
+     * @return bool
      */
-    protected function validate()
+    protected function validate(): bool
     {
-        if (!isset($this->files['file'])) {
-            $this->errors[] = 'File not found';
+        if (empty($this->files)) {
+            $this->errors[] = "Необходимо выбрать один или множество файлов";
             return false;
         }
 
-        if ($this->files['file']['type'] !== 'text/csv') {
-            $this->errors[] = 'File is not CSV format';
-            return false;
+        foreach ($this->files['name'] as $key => $fileName) {
+            if ($this->files['error'][$key] !== UPLOAD_ERR_OK) {
+                $this->errors[] = "Файл `{$fileName}` загружен с ошибкой `{$this->files['error'][$key]}`";
+                continue;
+            }
+
+            if (!in_array($this->files['type'][$key], $this->allowedTypes)) {
+                $this->errors[] = "Файл `{$fileName}` должен быть в CSV формате";
+                continue;
+            }
+
+            if ($this->files['size'][$key] > $this->maxSize) {
+                $this->errors[] = "Файл `{$fileName}` не должен превышать {$this->maxSize} Мб";
+            }
         }
 
-        if ($this->files['file']['size'] > 1024 * 1024 * 1024) {
-            self::sendError('File size is too large');
-        }
-
-        return true;
+        return empty($this->errors);
     }
 }
 

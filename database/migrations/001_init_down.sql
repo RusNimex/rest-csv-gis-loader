@@ -1,3 +1,14 @@
+--
+-- Удаление таблиц категорий и подкатегорий
+--
+DROP TABLE IF EXISTS company_subcategory;
+DROP TABLE IF EXISTS company_category;
+DROP TABLE IF EXISTS subcategory;
+DROP TABLE IF EXISTS category;
+
+--
+-- Удаление таблиц компаний
+--
 ALTER TABLE company_contact DROP CONSTRAINT FK_company_phone;
 ALTER TABLE company_contact DROP INDEX IX_phone;
 ALTER TABLE geo DROP CONSTRAINT FK_region;

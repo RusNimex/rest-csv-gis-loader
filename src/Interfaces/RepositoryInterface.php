@@ -2,6 +2,8 @@
 
 namespace App\Interfaces;
 
+use App\Models\GisCompany;
+
 interface RepositoryInterface
 {
     /**

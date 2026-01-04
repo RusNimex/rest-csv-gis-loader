@@ -4,7 +4,6 @@ namespace App\Migrations;
 
 use App\Repository\DatabaseConnection;
 use PDO;
-use Exception;
 
 /**
  * Миграция базы данных

@@ -4,6 +4,9 @@ namespace App\Models;
 
 use App\Interfaces\CsvRecordInterface;
 
+/**
+ * Модель компании для GIS
+ */
 final class GisCompany implements CsvRecordInterface
 {
     public function __construct(
@@ -18,15 +21,15 @@ final class GisCompany implements CsvRecordInterface
     /**
      * Фабричный метод для создания из массива CSV
      */
-    public static function fromCsvRow(array $record): self
+    public static function fromCsvRow(array $row): self
     {
         return new self(
-            $record['Название'] ?? '',
-            $record['Регион'] ?? '',
-            $record['Район'] ?? '',
-            $record['Город'] ?? '',
-            $record['Email'] ?? '',
-            $record['Телефон'] ?? '',
+            $row['Название'] ?? '',
+            $row['Регион'] ?? '',
+            $row['Район'] ?? '',
+            $row['Город'] ?? '',
+            $row['Email'] ?? '',
+            $row['Телефон'] ?? '',
         );
     }
 }

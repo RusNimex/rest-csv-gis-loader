@@ -3,8 +3,6 @@
 namespace App\Http;
 
 use Closure;
-use ReflectionFunction;
-use App\Controllers\UploadController;
 
 /**
  * Класс маршрутизатора
@@ -13,16 +11,18 @@ class Router
 {
     use ResponseTrait;
 
-    // Создадим экземпляр класса
+    /**
+     * @var Router|null Создадим экземпляр класса
+     */
     protected static ?Router $instance = null;
 
     /**
-     * Параметры и значения запроса
+     * @var array Параметры и значения запроса
      */
     protected array $params;
 
     /**
-     * Параметры, которые нужно исключить
+     * @var array Параметры, которые нужно исключить
      */
     protected array $excludedParams = [
         'XDEBUG_SESSION',
@@ -31,6 +31,9 @@ class Router
     
     /**
      * Насытим параметрами
+     *
+     * @param array $params
+     * @return void
      */
     public function setParams(array $params): void
     {
@@ -43,10 +46,14 @@ class Router
     
     /**
      * Добавим обраотку GET - запросов
-    */
+     *
+     * @param string $route
+     * @param callable|string $callback
+     * @return void
+     */
     public static function get(string $route, callable|string $callback): void
     {
-        if (!$_SERVER['REQUEST_METHOD'] === 'GET') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             return;
         }
         
@@ -56,26 +63,27 @@ class Router
             $router->setParams($_GET ?? []);
             $router->execute($callback);
         }
-            
-        return;
     }
     
     /**
-     * Создадим экземпляр класса
+     * Создадим экземпляр класса-одиночки
+     *
+     * @return self
      */
     protected static function create(): self
     {
         if (self::$instance !== null) {
             return self::$instance;
         }
-    
-        $result = new self();
-    
-        return $result;
+
+        return new self();
     }
 
     /**
      * Получим параметры и передадим их в контроллер
+     *
+     * @param callable|string $callback
+     * @return void
      */
     protected function execute(callable|string $callback): void
     {
@@ -84,30 +92,32 @@ class Router
             return;
         }
 
-        if (strpos($callback, '::') == true) {
-            [$cotrollerName, $actionName] = explode('::', $callback);
-            if (!class_exists($cotrollerName)) {
+        if (strpos($callback, '::')) {
+            [$controllerName, $actionName] = explode('::', $callback);
+            if (!class_exists($controllerName)) {
                 return;
             }
-            if (!method_exists($cotrollerName, $actionName)) {
+            if (!method_exists($controllerName, $actionName)) {
                 return;
             }
-            $controller = new $cotrollerName();
+            $controller = new $controllerName();
             $controller->$actionName($this->params);
         }
-        
-        return;
     }
     
     /**
      * Добавим обраотку POST - запросов
+     *
+     * @param string $route
+     * @param callable|string $callback
+     * @return void
      */
     public static function post(string $route, callable|string $callback): void
     {
-        if (!$_SERVER['REQUEST_METHOD'] === 'POST') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             return;
         }
-        
+
         $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
         if ($uri === $route) {
@@ -115,12 +125,12 @@ class Router
             $router->setParams($_POST ?? []);
             $router->execute($callback);
         }
-
-        return;
     }
 
     /**
      * Отправим ошибку, если маршрут не найден
+     *
+     * @return void
      */
     public static function end(): void
     {

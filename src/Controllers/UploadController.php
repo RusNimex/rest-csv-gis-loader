@@ -27,7 +27,7 @@ class UploadController
     /**
      * @var int|float Максимальный размер файла в байтах
      */
-    protected int|float $maxSize = 5 * 1024 * 1024;
+    protected int|float $maxSize = 10 * 1024 * 1024;
 
     /**
      * @var array Ошибки

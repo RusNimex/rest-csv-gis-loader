@@ -6,7 +6,7 @@ use App\Interfaces\RepositoryInterface;
 use App\Models\GisCompany;
 
 /**
- * Репозиторий для работы с компаниями
+ * Репозиторий для загрузки CSV-данных в базу
  */
 class CompanyRepository extends BaseRepository implements RepositoryInterface
 {
@@ -40,116 +40,342 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     /** @var int кол-во компаний для статистики */
     protected int $companyCount = 0;
 
+    /** @var array кэш geo записей для батч-вставки */
+    protected array $geoCache = [];
+
     /**
      * Вставка данных в таблицу в определенном порядке
+     *
+     * 1 Временно отключаем проверку внешних ключей для ускорения импорта
+     * 2 Предзагрузка всех справочников батчем
+     * 3 Батч-вставка geo записей
+     * 4 Батч-вставка компаний
+     * 5 Обработка связей
+     * 6 Массовая вставка связей
+     * 7 Включаем обратно проверку внешних ключей
      */
-    public function insert(array $rows): int
+    public function insert(array $rows): void
     {
-        $companies = 0;
-
-        foreach ($rows as $row) {
-            if (!($geoId = $this->insertGeo($row))) {
-                continue;
-            }
-
-            [$categories, $subcategories] = $this->insertCategory($row);
-
-            if (!($companyId = $this->insertCompany($row))) {
-                continue;
-            }
-
-            $this->collectCompanyGeos($companyId, $geoId);
-            $this->collectCompanyCategories($companyId, $categories, $subcategories);
-            $companies++;
+        if (empty($rows)) {
+            return;
         }
-        $this->insertCompanyGeos();
-        $this->insertCompanyCategories();
 
-        return $companies;
+        try {
+            $this->pdo->beginTransaction();
+
+            $this->pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+
+            $this->preloadDictionaries($rows);
+            $this->batchInsertGeo($rows);
+            $this->batchInsertCompanies($rows);
+
+            // Обработка связей
+            foreach ($rows as $row) {
+                $geoId = $this->getGeoId($row);
+                if (!$geoId) {
+                    continue;
+                }
+
+                [$categoryIds, $subcategoryIds] = $this->getCategoryIds($row);
+
+                $companyId = $this->company[$row->name] ?? null;
+                if (!$companyId) {
+                    continue;
+                }
+
+                $this->collectCompanyGeos($companyId, $geoId);
+                $this->collectCompanyCategories($companyId, $categoryIds, $subcategoryIds);
+            }
+
+            // Массовая вставка связей
+            $this->insertCompanyGeos();
+            $this->insertCompanyCategories();
+
+            $this->pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+
+            $this->pdo->commit();
+        } catch (\Exception $e) {
+            try {
+                $this->pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+            } catch (\Exception $fkException) {
+                // Игнорируем ошибку при восстановлении FK проверки
+            }
+            $this->pdo->rollBack();
+            $this->errors[] = sprintf('Ошибка при импорте: %s', $e->getMessage());
+        }
     }
 
     /**
-     * Вставка данных в таблицу geo
+     * Получим статистику импорта
      *
-     * @param GisCompany $record
-     * @return null|int
+     * @return array
      */
-    private function insertGeo(GisCompany $record): ?int
+    public function getSummary(): array
     {
-        $regionId = $districtId = $cityId = null;
-        $tables = ['region', 'district', 'city'];
-        foreach ($tables as $table) {
-            try {
-                if (!$record->$table) {
-                    continue;
+        return [
+            'company' => $this->companyCount,
+            'category' => count($this->companyCategories),
+            'region' => count($this->region),
+            'district' => count($this->district),
+            'city' => count($this->city),
+            'errors' => $this->errors,
+        ];
+    }
+
+    /**
+     * Предзагрузка всех справочников батчем
+     *
+     * @param array $rows
+     * @return void
+     */
+    private function preloadDictionaries(array $rows): void
+    {
+        $uniqueValues = [
+            'region' => [],
+            'district' => [],
+            'city' => [],
+            'category' => [],
+            'subcategory' => []
+        ];
+
+        // Собираем уникальные значения из всех записей
+        foreach ($rows as $row) {
+            if (!empty($row->region)) {
+                $uniqueValues['region'][$row->region] = true;
+            }
+            if (!empty($row->district)) {
+                $uniqueValues['district'][$row->district] = true;
+            }
+            if (!empty($row->city)) {
+                $uniqueValues['city'][$row->city] = true;
+            }
+
+            $categories = $this->extractCategories($row->category);
+            foreach ($categories as $cat) {
+                if (!empty($cat)) {
+                    $uniqueValues['category'][$cat] = true;
                 }
-                if (!isset($this->{$table}[$record->$table])) {
-                    $this->pdo->beginTransaction();
-                    $stmt = $this->pdo->prepare(
-                        "INSERT INTO csv.{$table} (name) VALUES (?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)"
-                    );
-                    $stmt->execute([$record->$table]);
-                    $this->{$table}[$record->$table] = (int)$this->pdo->lastInsertId();
-                    
-                    $this->pdo->commit();
+            }
+
+            $subcategories = $this->extractCategories($row->subcategory);
+            foreach ($subcategories as $subcategory) {
+                if (!empty($subcategory)) {
+                    $uniqueValues['subcategory'][$subcategory] = true;
                 }
-                ${$table . 'Id'} = $this->{$table}[$record->$table];
-            } catch (\Exception $e) {
-                $this->pdo->rollBack();
-                $this->errors[] = sprintf('%s - %s: %s', $table, $record->$table, $e->getMessage());
             }
         }
+
+        // Батч-вставка для каждого справочника
+        foreach ($uniqueValues as $table => $values) {
+            if (!empty($values)) {
+                $this->batchInsertDictionary($table, array_keys($values));
+            }
+        }
+    }
+
+    /**
+     * Батч-вставка справочника (только новые значения)
+     *
+     * Фильтруем уже загруженные значения
+     * Вставляем новые значения батчем
+     * @param string $table
+     * @param array $names
+     * @return void
+     */
+    private function batchInsertDictionary(string $table, array $names): void
+    {
+        $newNames = [];
+        foreach ($names as $name) {
+            if (!isset($this->{$table}[$name])) {
+                $newNames[] = $name;
+            }
+        }
+
+        if (empty($newNames)) {
+            return;
+        }
+
+        // Вставляем новые значения батчем
+        $placeholders = implode(',', array_fill(0, count($newNames), '(?)'));
+        $sql = "INSERT IGNORE INTO csv.{$table} (name) VALUES {$placeholders}";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($newNames);
+
+            // Загружаем ID для всех значений одним запросом
+            $this->loadDictionaryFromDb($table, $newNames);
+        } catch (\PDOException $e) {
+            $this->errors[] = sprintf('Ошибка при вставке %s: %s', $table, $e->getMessage());
+        }
+    }
+
+    /**
+     * Загрузка в кэш ID справочника из БД
+     *
+     * @param string $table
+     * @param array $names
+     * @return void
+     */
+    private function loadDictionaryFromDb(string $table, array $names): void
+    {
+        if (empty($names)) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($names), '?'));
+        $sql = "SELECT id, name FROM csv.{$table} WHERE name IN ({$placeholders})";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($names);
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $this->{$table}[$row['name']] = (int)$row['id'];
+            }
+        } catch (\PDOException $e) {
+            $this->errors[] = sprintf('Ошибка при загрузке %s: %s', $table, $e->getMessage());
+        }
+    }
+
+    /**
+     * Батч-вставка geo записей
+     *
+     * @param array $rows
+     * @return void
+     */
+    private function batchInsertGeo(array $rows): void
+    {
+        $geoData = [];
+        foreach ($rows as $row) {
+            $regionId = !empty($row->region) ? ($this->region[$row->region] ?? null) : null;
+            $districtId = !empty($row->district) ? ($this->district[$row->district] ?? null) : null;
+            $cityId = !empty($row->city) ? ($this->city[$row->city] ?? null) : null;
+
+            if (empty($regionId) && empty($districtId) && empty($cityId)) {
+                continue;
+            }
+
+            $key = "{$regionId}:{$districtId}:{$cityId}";
+            if (!isset($geoData[$key])) {
+                $geoData[$key] = [$regionId, $districtId, $cityId];
+            }
+        }
+
+        if (empty($geoData)) {
+            return;
+        }
+
+        // Вставляем уникальные комбинации geo
+        $values = [];
+        $params = [];
+        foreach ($geoData as $geo) {
+            $values[] = '(?, ?, ?)';
+            $params[] = $geo[0];
+            $params[] = $geo[1];
+            $params[] = $geo[2];
+        }
+
+        $sql = "INSERT IGNORE INTO csv.geo (region_id, district_id, city_id) VALUES " 
+             . implode(',', $values);
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+
+            // Загружаем ID обратно в кэш одним запросом
+            $this->loadGeoFromDb(array_keys($geoData));
+        } catch (\PDOException $e) {
+            $this->errors[] = sprintf('Ошибка при вставке geo: %s', $e->getMessage());
+        }
+    }
+
+    /**
+     * Загрузка geo ID из БД в кэш
+     *
+     * @param array $keys
+     * @return void
+     */
+    private function loadGeoFromDb(array $keys): void
+    {
+        if (empty($keys)) {
+            return;
+        }
+
+        $conditions = [];
+        $params = [];
+        foreach ($keys as $key) {
+            [$regionId, $districtId, $cityId] = explode(':', $key);
+            $conditions[] = '((region_id <=> ?) AND (district_id <=> ?) AND (city_id <=> ?))';
+            $params[] = $regionId === '' ? null : (int)$regionId;
+            $params[] = $districtId === '' ? null : (int)$districtId;
+            $params[] = $cityId === '' ? null : (int)$cityId;
+        }
+
+        $sql = "SELECT id, region_id, district_id, city_id FROM csv.geo WHERE " 
+             . implode(' OR ', $conditions);
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $key = sprintf(
+                    "%s:%s:%s",
+                    $row['region_id'] ?? '',
+                    $row['district_id'] ?? '',
+                    $row['city_id'] ?? ''
+                );
+                $this->geoCache[$key] = (int)$row['id'];
+            }
+        } catch (\PDOException $e) {
+            $this->errors[] = sprintf('Ошибка при загрузке geo: %s', $e->getMessage());
+        }
+    }
+
+    /**
+     * Получение geo ID из кэша
+     *
+     * @param GisCompany $record
+     * @return int|null
+     */
+    private function getGeoId(GisCompany $record): ?int
+    {
+        $regionId = !empty($record->region) ? ($this->region[$record->region] ?? null) : null;
+        $districtId = !empty($record->district) ? ($this->district[$record->district] ?? null) : null;
+        $cityId = !empty($record->city) ? ($this->city[$record->city] ?? null) : null;
 
         if (empty($regionId) && empty($districtId) && empty($cityId)) {
             return null;
         }
 
-        try {
-            $this->pdo->beginTransaction();
-            $stmt = $this->pdo->prepare(
-                'INSERT INTO csv.geo (region_id, district_id, city_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
-            );
-            $stmt->execute([$regionId, $districtId, $cityId]);
-            $geoId = (int)$this->pdo->lastInsertId();
+        $key = sprintf("%s:%s:%s", $regionId ?? '', $districtId ?? '', $cityId ?? '');
 
-            $this->pdo->commit();
-
-        } catch (\PDOException $e) {
-            $this->pdo->rollback();
-            $this->errors[] = sprintf('%s: %s', $record->region, $e->getMessage());
-
-            return null;
-        }
-
-        return $geoId;
+        return $this->geoCache[$key] ?? null;
     }
 
     /**
-     * Вставка данных по категории и подкатегории
+     * Получение ID категорий и подкатегорий из кэша
      *
      * @param GisCompany $record
-     * @return array<array<int>, array<int>>|null
+     * @return array{0: array<int>, 1: array<int>}
      */
-    private function insertCategory(GisCompany $record): ?array
+    private function getCategoryIds(GisCompany $record): array
     {
-        $fields = ['category', 'subcategory'];
-        $categoryIds = $subcategoryIds = null;
+        $categoryIds = [];
+        $subcategoryIds = [];
 
-        foreach ($fields as $field) {
-            ${$field} = $this->extractCategories($record->{$field});
-            foreach (${$field} as $type) {
-                if (!isset($this->{$field}[$type])) {
-                    $this->pdo->beginTransaction();
-                    $stmt = $this->pdo->prepare(
-                        "INSERT INTO csv.{$field} (name) VALUES (?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)"
-                    );
-                    $stmt->execute([$type]);
-                    $this->{$field}[$type] = (int)$this->pdo->lastInsertId();
+        $categories = $this->extractCategories($record->category);
+        foreach ($categories as $category) {
+            if (!empty($category) && isset($this->category[$category])) {
+                $categoryIds[] = $this->category[$category];
+            }
+        }
 
-                    $this->pdo->commit();
-
-                }
-                ${$field . 'Ids'}[] = $this->{$field}[$type];
+        $subcategories = $this->extractCategories($record->subcategory);
+        foreach ($subcategories as $subcategory) {
+            if (!empty($subcategory) && isset($this->subcategory[$subcategory])) {
+                $subcategoryIds[] = $this->subcategory[$subcategory];
             }
         }
 
@@ -157,36 +383,78 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     }
 
     /**
-     * Добавляем компанию и связываем ее с категорией и гео
+     * Батч-вставка компаний,
+     * чтоб все компании имели ID и были загружены в кеш
      *
-     * @param GisCompany $record
-     * @return null|int
+     * @param array $rows
+     * @return void
      */
-    private function insertCompany(GisCompany $record): ?int
+    private function batchInsertCompanies(array $rows): void
     {
-        if (isset($this->company[$record->name])) {
-            return $this->company[$record->name];
+        $uniqueCompanies = [];
+        foreach ($rows as $row) {
+            if (!empty($row->name) && !isset($this->company[$row->name])) {
+                $uniqueCompanies[$row->name] = true;
+            }
         }
 
+        if (empty($uniqueCompanies)) {
+            return;
+        }
+
+        $companyNames = array_keys($uniqueCompanies);
+        $placeholders = implode(',', array_fill(0, count($companyNames), '(?)'));
+        $sql = "INSERT IGNORE INTO csv.company (name) VALUES {$placeholders}";
+
         try {
-            $this->pdo->beginTransaction();
-            $stmt = $this->pdo->prepare(
-                "INSERT INTO csv.company (name) VALUES (?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)"
-            );
-            $stmt->execute([$record->name]);
-            $companyId = (int)$this->pdo->lastInsertId();
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($companyNames);
 
-            $this->pdo->commit();
-
-            $this->company[$record->name] = $companyId;
-            $this->companyCount++;
-
-            return $companyId;
+            $this->loadCompaniesFromDb($companyNames);
         } catch (\PDOException $e) {
-            $this->pdo->rollback();
-            $this->errors[] = sprintf('%s: %s', $record->name, $e->getMessage());
+            $this->errors[] = sprintf('Ошибка при вставке компаний: %s', $e->getMessage());
+        }
+    }
 
-            return null;
+    /**
+     * Загрузка ID компаний из БД
+     *
+     * @param array $names
+     * @return void
+     */
+    private function loadCompaniesFromDb(array $names): void
+    {
+        if (empty($names)) {
+            return;
+        }
+
+        // Фильтруем уже загруженные
+        $newNames = [];
+        foreach ($names as $name) {
+            if (!empty($name) && !isset($this->company[$name])) {
+                $newNames[] = $name;
+            }
+        }
+
+        if (empty($newNames)) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($newNames), '?'));
+        $sql = "SELECT id, name FROM csv.company WHERE name IN ({$placeholders})";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($newNames);
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                if (!isset($this->company[$row['name']])) {
+                    $this->company[$row['name']] = (int)$row['id'];
+                    $this->companyCount++;
+                }
+            }
+        } catch (\PDOException $e) {
+            $this->errors[] = sprintf('Ошибка при загрузке компаний: %s', $e->getMessage());
         }
     }
 
@@ -306,8 +574,7 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     }
 
     /**
-     * Когда известна компания и ее гео данные, то остальное вставляем
-     * массово одним запросом вставка связки компаний с доп данными
+     * Заполняем таблицы со связями
      *
      * @param array $values
      * @param string $sql
@@ -316,36 +583,18 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
      */
     private function insertPivot(array $values, string $sql, array $params): void
     {
+        if (empty($values)) {
+            return;
+        }
+
         $sql .= implode(', ', $values);
 
         try {
-            $this->pdo->beginTransaction();
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-
-            $this->pdo->commit();
-
         } catch (\PDOException $e) {
-            $this->pdo->rollback();
-            $this->errors[] = $e->getMessage();
+            $this->errors[] = sprintf('Ошибка при вставке связей: %s', $e->getMessage());
         }
-    }
-
-    /**
-     * Получим статистику импорта
-     *
-     * @return array
-     */
-    public function getSummary(): array
-    {
-        return [
-            'company' => $this->companyCount,
-            'category' => count($this->companyCategories),
-            'region' => count($this->region),
-            'district' => count($this->district),
-            'city' => count($this->city),
-            'errors' => $this->errors,
-        ];
     }
 }
 

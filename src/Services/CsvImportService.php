@@ -106,7 +106,7 @@ class CsvImportService implements CsvImportServiceInterface
 
                 $this->load();
             }
-        } catch (\Exception $e) { // UnavailableStream|InvalidArgument
+        } catch (\Exception $e) {
             $this->errors[] = $e->getMessage();
             return;
         } finally {
@@ -212,7 +212,8 @@ class CsvImportService implements CsvImportServiceInterface
         // Вычисляем длительность выполнения, если это конец импорта
         if ($key === 'end' && isset($this->summary['time']['start'])) {
             $duration = $microtime - $this->summary['time']['start'];
-            $this->summary['time']['duration'] = $this->formatDuration($duration);
+            $this->summary['duration'] = $this->formatDuration($duration);
+            unset($this->summary['time']);
         }
     }
 

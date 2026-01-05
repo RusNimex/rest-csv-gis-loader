@@ -43,6 +43,9 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     /** @var array кэш geo записей для батч-вставки */
     protected array $geoCache = [];
 
+    /** @var int Максимальное количество записей в одном батче для pivot таблиц */
+    private const PIVOT_BATCH_SIZE = 5000;
+
     /**
      * Вставка данных в таблицу в определенном порядке
      *
@@ -521,7 +524,7 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     }
 
     /**
-     * Вставим одним запросом привязку компаний к гео
+     * Вставим батчами привязку компаний к гео
      *
      * @return void
      */
@@ -531,22 +534,34 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
             return;
         }
 
-        $sql = 'INSERT IGNORE INTO csv.company_geo (company_id, geo_id) VALUES ';
-        $values = [];
-        $params = [];
-
+        // Собираем все связи в плоский массив
+        $allLinks = [];
         foreach ($this->companyGeos as $companyId => $geoIds) {
             foreach ($geoIds as $geoId) {
-                $values[] = '(?, ?)';
-                $params[] = $companyId;
-                $params[] = $geoId;
+                $allLinks[] = [$companyId, $geoId];
             }
         }
-        $this->insertPivot($values, $sql, $params);
+
+        // Разбиваем на батчи
+        $batches = array_chunk($allLinks, self::PIVOT_BATCH_SIZE);
+        
+        foreach ($batches as $batch) {
+            $sql = 'INSERT IGNORE INTO csv.company_geo (company_id, geo_id) VALUES ';
+            $values = [];
+            $params = [];
+
+            foreach ($batch as $link) {
+                $values[] = '(?, ?)';
+                $params[] = $link[0];
+                $params[] = $link[1];
+            }
+
+            $this->insertPivot($values, $sql, $params);
+        }
     }
 
     /**
-     * Вставим одним запросом привязку компаний к категориям и подкатегориям
+     * Вставим батчами привязку компаний к категориям и подкатегориям
      *
      * @return void
      */
@@ -559,17 +574,34 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
         $fields = ['category', 'subcategory'];
 
         foreach ($fields as $type) {
-            $sql = "INSERT IGNORE INTO csv.company_{$type} (company_id, {$type}_id) VALUES ";
-            $values = [];
-            $params = [];
+            // Собираем все связи в плоский массив
+            $allLinks = [];
             foreach ($this->companyCategories as $companyId => $types) {
                 foreach ($types[$type] as $valueId) {
-                    $values[] = '(?, ?)';
-                    $params[] = $companyId;
-                    $params[] = $valueId;
+                    $allLinks[] = [$companyId, $valueId];
                 }
             }
-            $this->insertPivot($values, $sql, $params);
+
+            if (empty($allLinks)) {
+                continue;
+            }
+
+            // Разбиваем на батчи
+            $batches = array_chunk($allLinks, self::PIVOT_BATCH_SIZE);
+
+            foreach ($batches as $batch) {
+                $sql = "INSERT IGNORE INTO csv.company_{$type} (company_id, {$type}_id) VALUES ";
+                $values = [];
+                $params = [];
+
+                foreach ($batch as $link) {
+                    $values[] = '(?, ?)';
+                    $params[] = $link[0];
+                    $params[] = $link[1];
+                }
+
+                $this->insertPivot($values, $sql, $params);
+            }
         }
     }
 

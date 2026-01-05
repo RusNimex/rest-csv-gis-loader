@@ -52,19 +52,6 @@ class CsvImportService implements CsvImportServiceInterface
             'end' => null,
             'duration' => null,
         ],
-        'memory' => [
-            'start' => [
-                'usage' => null,
-                'real_usage' => null,
-            ],
-            'end' => [
-                'usage' => null,
-                'real_usage' => null,
-            ],
-            'peak' => [
-                'usage' => null,
-            ],
-        ],
     ];
 
     /**
@@ -95,7 +82,6 @@ class CsvImportService implements CsvImportServiceInterface
     public function import(): void
     {
         $this->logTime();
-        $this->logMemoryUsage();
         try {
             foreach ($this->files['name'] as $key => $fileName) {
                 $this->reader = Reader::from($this->files['tmp_name'][$key]);
@@ -111,7 +97,6 @@ class CsvImportService implements CsvImportServiceInterface
             return;
         } finally {
             $this->logTime('end');
-            $this->logMemoryUsage('end');
         }
     }
 
@@ -176,29 +161,6 @@ class CsvImportService implements CsvImportServiceInterface
     }
 
     /**
-     * Следим за расходом памяти
-     *
-     * @param string $key
-     * @return void
-     */
-    private function logMemoryUsage(string $key = 'start'): void
-    {
-        $usage = memory_get_usage();
-        $realUsage = memory_get_usage(true);
-        
-        $this->summary['memory'][$key] = [
-            'usage' => $this->formatBytes($usage),
-            'real_usage' => $this->formatBytes($realUsage),
-        ];
-
-        // Отслеживаем пик использования памяти
-        $peakUsage = memory_get_peak_usage(true);
-        $this->summary['memory']['peak'] = [
-            'usage' => $this->formatBytes($peakUsage),
-        ];
-    }
-
-    /**
      * Запомним время начала и конца импорта
      *
      * @param string $key
@@ -216,7 +178,5 @@ class CsvImportService implements CsvImportServiceInterface
             unset($this->summary['time']);
         }
     }
-
-
 }
 

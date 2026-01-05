@@ -3,7 +3,9 @@
 --
 CREATE TABLE IF NOT EXISTS company (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
-    name VARCHAR(255) NOT NULL
+    name VARCHAR(255) NOT NULL,
+
+    UNIQUE INDEX UIX_company_name (name)
 );
 
 --
@@ -26,7 +28,9 @@ CREATE TABLE IF NOT EXISTS company_contact (
 --
 CREATE TABLE IF NOT EXISTS region (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
-    name VARCHAR(255) NOT NULL
+    name VARCHAR(255) NOT NULL,
+
+    UNIQUE INDEX UIX_region_name (name)
 );
 
 -- 
@@ -34,7 +38,9 @@ CREATE TABLE IF NOT EXISTS region (
 --
 CREATE TABLE IF NOT EXISTS district (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
-    name VARCHAR(255) NOT NULL
+    name VARCHAR(255) NOT NULL,
+
+    UNIQUE INDEX UIX_district_name (name)
 );
 
 --
@@ -42,7 +48,9 @@ CREATE TABLE IF NOT EXISTS district (
 --
 CREATE TABLE IF NOT EXISTS city (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
-    name VARCHAR(255) NOT NULL
+    name VARCHAR(255) NOT NULL,
+
+    UNIQUE INDEX UIX_city_name (name)
 );
 
 -- 
@@ -53,6 +61,8 @@ CREATE TABLE IF NOT EXISTS geo (
     region_id INT DEFAULT NULL,
     district_id INT DEFAULT NULL,
     city_id INT DEFAULT NULL,
+
+    UNIQUE INDEX UIX_geo (region_id, district_id, city_id),
 
     CONSTRAINT FK_region 
     FOREIGN KEY (region_id) REFERENCES region(id) ON DELETE SET NULL,
@@ -65,7 +75,8 @@ CREATE TABLE IF NOT EXISTS geo (
 );
 
 -- 
--- Связь компаний и городов, районов, регионов 
+-- Связь компаний и городов, районов, регионов
+-- Одна компания может находиться в нескольких местах одного города, района, региона
 --
 CREATE TABLE IF NOT EXISTS company_geo (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
@@ -85,16 +96,20 @@ CREATE TABLE IF NOT EXISTS company_geo (
 -- Категории компаний
 --
 CREATE TABLE IF NOT EXISTS category (
-    id INT NOT NULL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+
+    UNIQUE INDEX UIX_category_name (name)
 );
 
 --
 -- Подкатегории (не связаны с категориями)
 --
 CREATE TABLE IF NOT EXISTS subcategory (
-    id INT NOT NULL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+
+    UNIQUE INDEX UIX_subcategory_name (name)
 );
 
 --

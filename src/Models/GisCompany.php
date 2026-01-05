@@ -16,6 +16,8 @@ final class GisCompany implements CsvRecordInterface
         public string $city,
         public string $email,
         public string $phone,
+        public string $category,
+        public string $subcategory,
     ) {}
 
     /**
@@ -30,6 +32,8 @@ final class GisCompany implements CsvRecordInterface
             $row['Город'] ?? '',
             $row['Email'] ?? '',
             $row['Телефон'] ?? '',
+            $row['Рубрика'] ?? '',
+            $row['Подрубрика'] ?? '',
         );
     }
 }

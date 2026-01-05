@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\FormatterTrait;
 use League\Csv\Reader;
 use App\Interfaces\RepositoryInterface;
 use App\Interfaces\CsvRecordInterface;
@@ -12,6 +13,8 @@ use App\Interfaces\CsvImportServiceInterface;
  */
 class CsvImportService implements CsvImportServiceInterface
 {
+    use FormatterTrait;
+
     /**
      * @var array Ошибки
      */
@@ -43,7 +46,25 @@ class CsvImportService implements CsvImportServiceInterface
     private array $summary = [
         'total' => 0,
         'imported' => 0,
-        'files' => []
+        'files' => [],
+        'time' => [
+            'start' => null,
+            'end' => null,
+            'duration' => null,
+        ],
+        'memory' => [
+            'start' => [
+                'usage' => null,
+                'real_usage' => null,
+            ],
+            'end' => [
+                'usage' => null,
+                'real_usage' => null,
+            ],
+            'peak' => [
+                'usage' => null,
+            ],
+        ],
     ];
 
     /**
@@ -73,6 +94,8 @@ class CsvImportService implements CsvImportServiceInterface
      */
     public function import(): void
     {
+        $this->logTime();
+        $this->logMemoryUsage();
         try {
             foreach ($this->files['name'] as $key => $fileName) {
                 $this->reader = Reader::from($this->files['tmp_name'][$key]);
@@ -80,17 +103,21 @@ class CsvImportService implements CsvImportServiceInterface
                 $this->reader->setDelimiter(';');
                 $this->summary['total'] += count($this->reader);
                 $this->summary['files'][] = $fileName;
+
                 $this->load();
             }
         } catch (\Exception $e) { // UnavailableStream|InvalidArgument
             $this->errors[] = $e->getMessage();
             return;
+        } finally {
+            $this->logTime('end');
+            $this->logMemoryUsage('end');
         }
     }
 
     /**
-     * Каждый файл загружается в отдельном потоке
-     * Загружаем частями
+     * Каждый файл загружается в отдельном потоке,
+     * Загружаем частями.
      * Каждую запись оборачиваем в DTO-модель {@see CsvRecordInterface}
      *
      * @return void
@@ -104,10 +131,12 @@ class CsvImportService implements CsvImportServiceInterface
                 foreach ($chunk as $row) {
                     $records[] = $this->contract::fromCsvRow($row);
                 }
-                $this->summary['imported'] += $this->repository->insert($records);
+                $this->repository->insert($records);
             };
         } catch (\Exception $e) {
             $this->errors[] = $e->getMessage();
+        } finally {
+            $this->logSummary($this->repository->getSummary());
         }
     }
 
@@ -134,5 +163,59 @@ class CsvImportService implements CsvImportServiceInterface
     {
         return $this->summary;
     }
+
+    /**
+     * Статистка импорта
+     *
+     * @param array $summary
+     * @return void
+     */
+    private function logSummary(array $summary): void
+    {
+        $this->summary['imported'] = $summary;
+    }
+
+    /**
+     * Следим за расходом памяти
+     *
+     * @param string $key
+     * @return void
+     */
+    private function logMemoryUsage(string $key = 'start'): void
+    {
+        $usage = memory_get_usage();
+        $realUsage = memory_get_usage(true);
+        
+        $this->summary['memory'][$key] = [
+            'usage' => $this->formatBytes($usage),
+            'real_usage' => $this->formatBytes($realUsage),
+        ];
+
+        // Отслеживаем пик использования памяти
+        $peakUsage = memory_get_peak_usage(true);
+        $this->summary['memory']['peak'] = [
+            'usage' => $this->formatBytes($peakUsage),
+        ];
+    }
+
+    /**
+     * Запомним время начала и конца импорта
+     *
+     * @param string $key
+     * @return void
+     */
+    private function logTime(string $key = 'start'): void
+    {
+        $microtime = microtime(true);
+        $this->summary['time'][$key] = $microtime;
+        
+        // Вычисляем длительность выполнения, если это конец импорта
+        if ($key === 'end' && isset($this->summary['time']['start'])) {
+            $duration = $microtime - $this->summary['time']['start'];
+            $this->summary['time']['duration'] = $this->formatDuration($duration);
+        }
+    }
+
+
 }
 

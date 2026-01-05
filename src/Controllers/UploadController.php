@@ -53,22 +53,26 @@ class UploadController
             self::sendError($this->errors);
         }
 
-        $service = new CsvImportService(
-            $this->files,
-            CompanyRepository::class,
-            GisCompany::class,
-        );
+        try {
+            $service = new CsvImportService(
+                $this->files,
+                CompanyRepository::class,
+                GisCompany::class,
+            );
 
-        $service->import();
+            $service->import();
 
-        if ($service->hasErrors()) {
-            self::sendError($service->getErrors());
+            if ($service->hasErrors()) {
+                self::sendError($service->getErrors());
+            }
+
+            self::sendResponse([
+                'message' => 'Файлы успешно загружены',
+                'summary' => $service->getSummary(),
+            ]);
+        } catch (\Exception $e) {
+            self::sendError($e->getMessage());
         }
-
-        self::sendResponse([
-            'message' => 'Файлы успешно загружены',
-            'summary' => $service->getSummary(),
-        ]);
     }
 
     /**

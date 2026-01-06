@@ -38,14 +38,14 @@ trait FormatterTrait
             return round($seconds, 2) . ' сек';
         }
 
-        $minutes = floor($seconds / 60);
+        $minutes = intval(floor($seconds / 60));
         $remainingSeconds = $seconds % 60;
 
         if ($minutes < 60) {
             return $minutes . ' мин ' . round($remainingSeconds, 2) . ' сек';
         }
 
-        $hours = floor($minutes / 60);
+        $hours = intval(floor($minutes / 60));
         $remainingMinutes = $minutes % 60;
 
         return $hours . ' ч ' . $remainingMinutes . ' мин ' . round($remainingSeconds, 2) . ' сек';

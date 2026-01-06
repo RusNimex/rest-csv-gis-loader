@@ -10,6 +10,7 @@
         "php": ">=8.1",
         "ext-pdo": "*",
         "league/csv": "^9.28",
-        "ext-mbstring": "*"
+        "ext-mbstring": "*",
+        "vlucas/phpdotenv": "^5.5"
     }
 }

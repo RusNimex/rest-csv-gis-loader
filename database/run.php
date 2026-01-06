@@ -3,6 +3,12 @@
 require __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../src/bootstrap.php';
 
+// Загружаем .env файл если он существует
+if (file_exists(ROOT_PATH . '/.env')) {
+    $dotenv = Dotenv\Dotenv::createImmutable(ROOT_PATH);
+    $dotenv->load();
+}
+
 use App\Migrations\MigrationRunner;
 
 /**

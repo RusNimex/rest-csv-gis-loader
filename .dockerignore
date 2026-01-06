@@ -1,0 +1,14 @@
+vendor/
+.git/
+.gitignore
+*.md
+.env
+.env.*
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+

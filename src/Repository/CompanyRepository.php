@@ -10,39 +10,6 @@ use App\Models\GisCompany;
  */
 class CompanyRepository extends BaseRepository implements RepositoryInterface
 {
-    /** @var array кэш регионов */
-    protected array $region = [];
-
-    /** @var array кэш районов */
-    protected array $district = [];
-
-    /** @var array кэш городов */
-    protected array $city = [];
-
-    /** @var array кэш категорий */
-    protected array $category = [];
-
-    /** @var array кэш подкатегорий */
-    protected array $subcategory = [];
-
-    /** @var array кэш компаний */
-    protected array $company = [];
-
-    /** @var array соберем битые категории/подкатегории */
-    protected array $sanitized = [];
-
-    /** @var array для массовой вставки Компания-Гео одним запросом */
-    protected array $companyGeos = [];
-
-    /** @var array для массовой вставки Компания-Категории/Подкатегории одним запросом */
-    protected array $companyCategories = [];
-
-    /** @var int кол-во компаний для статистики */
-    protected int $companyCount = 0;
-
-    /** @var array кэш geo записей для батч-вставки */
-    protected array $geoCache = [];
-
     /** @var int Максимальное количество записей в одном батче для pivot таблиц */
     private const PIVOT_BATCH_SIZE = 5000;
 
@@ -464,6 +431,7 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     /**
      * Выделяем категории/подкатегории из строки разделенные запятой
      *
+     * Дополнительно: удаляем последний элемент, если общая длина строки подозрительно большая
      * @param string $commaValues
      * @return array
      */
@@ -471,13 +439,42 @@ class CompanyRepository extends BaseRepository implements RepositoryInterface
     {
         $values = explode(',', $commaValues);
         $sanitized = array_map('trim', $values);
-        $lastValue = $sanitized[count($sanitized) - 1];
-        if (empty($lastValue) || !is_string($lastValue) || strlen($lastValue) < 5) {
-            unset($sanitized[count($sanitized) - 1]);
-            $this->sanitized[] = $lastValue;
+    
+        if (empty($sanitized)) {
+            return [];
         }
-
-        return $sanitized;
+    
+        // Если строка длинная или много элементов - удаляем последний
+        $strLength = mb_strlen($commaValues, 'UTF-8');
+        $elementCount = count($sanitized);
+        
+        if ($elementCount > 1) {
+            $lastValue = $sanitized[$elementCount - 1];
+            $lastLength = mb_strlen($lastValue, 'UTF-8');
+            
+            // Удаляем последний элемент если:
+            // 1. Строка очень длинная (>= 540 символов), есть вероятность обрезки названия категории
+            // 2. ИЛИ последний элемент подозрительно короткий (< 4 символов)
+            // 3. ИЛИ последний элемент заканчивается на "/" или "-"
+            $shouldRemove = false;
+            
+            if ($strLength >= 540) {
+                $shouldRemove = true;
+            } elseif ($lastLength < 4 && $elementCount > 2) {
+                $shouldRemove = true;
+            } elseif (in_array(mb_substr(rtrim($lastValue), -1, 1, 'UTF-8'), ['/', '-', ','])) {
+                $shouldRemove = true;
+            }
+            
+            if ($shouldRemove) {
+                if (!isset($this->errors['category_broken'])) {
+                    $this->errors['category_broken'] = [];
+                }
+                $this->errors['category_broken'][] = array_pop($sanitized);
+            }
+        }
+    
+        return array_values($sanitized);
     }
 
     /**

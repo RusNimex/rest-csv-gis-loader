@@ -28,7 +28,7 @@ class CsvImportService implements CsvImportServiceInterface
     /**
      * @var int Размер чанка
      */
-    private int $chunkSize = 100;
+    private int $chunkSize = 100000;
 
     /**
      * @var RepositoryInterface|mixed Репозиторий для работы с данными
